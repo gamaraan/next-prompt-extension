@@ -1403,6 +1403,50 @@ describe("overlayGhost", () => {
 		expect(out[2]).toBe(lines[2]); // bottom border untouched
 		expect(out[1]).not.toBe(lines[1]);
 	});
+	const plain = (s: string) =>
+		s.replace(CURSOR_MARKER, "").replace(/\x1b\[[0-9;]*m/g, "");
+	test("T60b: cursor before existing text — ghost never pushes the line past width", () => {
+		// Regression: cursor at column 0 of a filled editor counted only the
+		// text left of the cursor, so ghost + trailing text overflowed (226 > 133)
+		// and Pi's TUI threw "Rendered line exceeds terminal width".
+		const border = "─".repeat(WIDTH);
+		const rest = "erify the searches return results";
+		const line = CURSOR_MARKER + "\x1b[7mV\x1b[0m" + rest;
+		const padded = line + " ".repeat(WIDTH - 1 - rest.length);
+		const out = overlayGhost([border, padded, border], "x".repeat(WIDTH), WIDTH);
+		for (const l of out) expect(visibleWidth(l)).toBeLessThanOrEqual(WIDTH);
+		// The ghost gets exactly the 6 padding cells, between cursor and text.
+		expect(out[1]).toContain("\x1b[2mxxxxxx");
+		expect(plain(out[1]!)).toBe("V" + "xxxxxx" + rest);
+	});
+	test("T60c: zero-width whitespace after the cursor is not counted as padding", () => {
+		// `\s` matches U+FEFF (zero width); treating it as a free cell let the
+		// ghost grow the line past width.
+		const border = "─".repeat(WIDTH);
+		const rest = "\uFEFF" + "a".repeat(WIDTH - 2);
+		const line = CURSOR_MARKER + "\x1b[7mV\x1b[0m" + rest;
+		const out = overlayGhost([border, line, border], "xyz", WIDTH);
+		expect(visibleWidth(out[1]!)).toBeLessThanOrEqual(WIDTH);
+		expect(out[1]).toContain(rest);
+	});
+	test("T60d: a typed space right after the cursor is kept; trailing padding feeds the ghost", () => {
+		const border = "─".repeat(WIDTH);
+		const line = CURSOR_MARKER + "\x1b[7mA\x1b[0m" + " B" + " ".repeat(WIDTH - 3);
+		const out = overlayGhost([border, line, border], "xyz", WIDTH);
+		expect(visibleWidth(out[1]!)).toBe(WIDTH);
+		expect(out[1]).toContain("\x1b[7mA\x1b[0m\x1b[2mxyz\x1b[22m B");
+	});
+	test("T60e: OMP cursor at end with a right border — ghost fills only the padding", () => {
+		// OMP pads between the cursor glyph and its border (`▌<pad>─╯`); the
+		// border cells are not free, so the ghost must stop at the padding.
+		const cursorGlyph = "\u258c";
+		const pad = WIDTH - 3;
+		const line = CURSOR_MARKER + cursorGlyph + " ".repeat(pad) + "─╯";
+		const out = overlayGhost(["─".repeat(WIDTH), line, "─".repeat(WIDTH)], "x".repeat(WIDTH * 2), WIDTH);
+		expect(visibleWidth(out[1]!)).toBe(WIDTH);
+		expect(out[1]).toContain(`\x1b[2m${"x".repeat(pad)}`);
+		expect(plain(out[1]!)).toBe(cursorGlyph + "x".repeat(pad) + "─╯");
+	});
 	test("T62: empty lines array returns []", () => {
 		expect(overlayGhost([], "sug", WIDTH)).toEqual([]);
 	});
