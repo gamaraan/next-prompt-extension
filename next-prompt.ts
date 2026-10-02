@@ -1695,10 +1695,21 @@ export function overlayGhost(
 
 	// Compute the visible width of the real content before the cursor (text +
 	// cursor glyph; ANSI and the marker stripped) so the ghost is sized to fit
-	// without overflowing the editor width.
+	// without overflowing the editor width. Only padding may be given to the
+	// ghost: text after the cursor (cursor at the start of a filled editor)
+	// keeps its cells, else the line overflows and Pi's TUI throws. Padding is
+	// plain spaces (`\s` also matches zero-width U+FEFF), taken from the line
+	// end first so a space the user typed right after the cursor survives.
 	const leftPart = line.slice(0, insertAt);
 	const leftVisible = visibleWidth(stripAnsi(leftPart));
-	const remaining = Math.max(0, contentWidth - leftVisible);
+	const rawTail = line.slice(insertAt);
+	const trailingPad = rawTail.match(/ +$/)?.[0].length ?? 0;
+	const leadingPad = trailingPad > 0 ? 0 : rawTail.match(/^ +/)?.[0].length ?? 0;
+	const slack = Math.max(0, contentWidth - visibleWidth(stripAnsi(line)));
+	const remaining = Math.max(
+		0,
+		Math.min(contentWidth - leftVisible, leadingPad + trailingPad + slack),
+	);
 
 	const ghostSlice =
 		visibleWidth(ghost) > remaining
@@ -1711,15 +1722,11 @@ export function overlayGhost(
 	// Preserve the line's exact width: remove ghostVisible cells from the
 	// padding adjacent to the cursor. Pi pads at the line end (`rest<pad>`);
 	// OMP pads right after the cursor, before the right border (`<pad>─╯`).
-	let tail = line.slice(insertAt);
-	const leadingPad = tail.match(/^\s+/)?.[0].length ?? 0;
-	if (leadingPad > 0) {
+	let tail = rawTail;
+	if (trailingPad > 0) {
+		tail = tail.slice(0, Math.max(0, tail.length - Math.min(trailingPad, ghostVisible)));
+	} else if (leadingPad > 0) {
 		tail = tail.slice(Math.min(leadingPad, ghostVisible));
-	} else {
-		const trailingPad = tail.match(/\s+$/)?.[0].length ?? 0;
-		if (trailingPad > 0) {
-			tail = tail.slice(0, Math.max(0, tail.length - Math.min(trailingPad, ghostVisible)));
-		}
 	}
 	result[cursorLineIdx] = leftPart + ghostStyled + tail;
 	return result;
